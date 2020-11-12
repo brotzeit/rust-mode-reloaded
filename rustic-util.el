@@ -68,6 +68,12 @@
   "Marker, holding location of the cursor's position before
 running rustfmt.")
 
+(defvar rustic-format-error-buffer-name "*rustfmt-errors*"
+  "Name for buffer that holds rustfmt errors and warnings.")
+
+(define-derived-mode rustic-format-warnings-mode special-mode "rustfmt-warnings"
+  :group 'rustic)
+
 (defun rustic-format-start-process (sentinel &rest args)
   "Run rustfmt with ARGS.
 
@@ -84,7 +90,8 @@ When COMMAND is non-nil, it replaces the default command.
 When COMMAND is a string, it is the program file name.
 When COMMAND is a list, it's `car' is the program file name
 and it's `cdr' is a list of arguments."
-  (let* ((err-buf (get-buffer-create rustic-format-buffer-name))
+  (let* ((output-buf (get-buffer-create rustic-format-buffer-name))
+         (err-buf (get-buffer-create rustic-format-error-buffer-name))
          (inhibit-read-only t)
          (dir (rustic-buffer-workspace))
          (buffer (plist-get args :buffer))
@@ -94,17 +101,20 @@ and it's `cdr' is a list of arguments."
          (command (or (plist-get args :command)
                       (cons rustic-rustfmt-bin (rustic-compute-rustfmt-args))))
          (command (if (listp command) command (list command))))
+    (with-current-buffer output-buf
+      (erase-buffer))
     (setq rustic-save-pos (set-marker (make-marker) (point) (current-buffer)))
     (rustic-compilation-setup-buffer err-buf dir 'rustic-format-mode t)
     (--each files
       (unless (file-exists-p it)
         (error (format "File %s does not exist." it))))
-    (with-current-buffer err-buf
+    (with-current-buffer output-buf
       (let ((proc (rustic-make-process :name rustic-format-process-name
                                        :buffer err-buf
                                        :command `(,@command "--" ,@files)
                                        :filter #'rustic-compilation-filter
-                                       :sentinel sentinel)))
+                                       :sentinel sentinel
+                                       :stderr output-buf)))
         (setq next-error-last-buffer buffer)
         (when string
           (while (not (process-live-p proc))
@@ -115,31 +125,42 @@ and it's `cdr' is a list of arguments."
 
 (defun rustic-format-sentinel (proc output)
   "Sentinel for rustfmt processes when using stdin."
-  (ignore-errors
-    (let ((proc-buffer (process-buffer proc))
-          (inhibit-read-only t))
-      (with-current-buffer proc-buffer
-        (if (string-match-p "^finished" output)
-            (let ((file-buffer next-error-last-buffer)
-                  ;; replace-buffer-contents was in emacs 26.1, but it
-                  ;; was broken for non-ASCII strings, so we need 26.2.
-                  (use-replace (version<= "26.2" emacs-version)))
-              (unless use-replace
-                (copy-to-buffer file-buffer (point-min) (point-max)))
-              (with-current-buffer file-buffer
-                (if use-replace
-                    (replace-buffer-contents proc-buffer))
-                (goto-char rustic-save-pos))
-              (kill-buffer proc-buffer)
-              (message "Formatted buffer with rustfmt."))
-          (goto-char (point-min))
-          (when-let ((file (buffer-file-name next-error-last-buffer)))
-            (save-excursion
-              (save-match-data
-                (when (search-forward "<stdin>" nil t)
-                  (replace-match file)))))
-          (funcall rustic-format-display-method proc-buffer)
-          (message "Rustfmt error."))))))
+  (let ((output-buf (process-buffer proc))
+        (error-buf (get-buffer rustic-format-error-buffer-name))
+        (inhibit-read-only t))
+    (cond
+     ((and (= (process-exit-status proc) 0)
+           (string-match "^Warning:" output))
+      (with-current-buffer error-buf
+        (rustic-format-warnings-mode))
+      (pop-to-buffer error-buf)
+      (kill-buffer output-buf))
+     ((and 
+       (string-match-p "^finished" output))
+      (let ((file-buffer next-error-last-buffer)
+            ;; replace-buffer-contents was in emacs 26.1, but it
+            ;; was broken for non-ASCII strings, so we need 26.2.
+            (use-replace (version<= "26.2" emacs-version)))
+        (with-current-buffer output-buf
+          (unless use-replace
+            (copy-to-buffer file-buffer (point-min) (point-max)))
+          (with-current-buffer file-buffer
+            (if use-replace
+                (replace-buffer-contents output-buf))
+            (goto-char rustic-save-pos)))
+        (kill-buffer output-buf)
+        (kill-buffer error-buf)
+        (message "Formatted buffer with rustfmt.")))
+     (t
+      (with-current-buffer error-buf
+        (goto-char (point-min))
+        (when-let ((file (buffer-file-name next-error-last-buffer)))
+          (save-excursion
+            (save-match-data
+              (when (search-forward "<stdin>" nil t)
+                (replace-match file))))))
+      (funcall rustic-format-display-method error-buf)
+      (message "Rustfmt error.")))))
 
 (defun rustic-format-file-sentinel (proc output)
   "Sentinel for rustfmt processes when formatting a file."
@@ -147,8 +168,10 @@ and it's `cdr' is a list of arguments."
     (let ((proc-buffer (process-buffer proc)))
       (with-current-buffer proc-buffer
         (if (string-match-p "^finished" output)
-            (with-current-buffer next-error-last-buffer
-              (revert-buffer t t))
+            (progn
+              (with-current-buffer next-error-last-buffer
+                (revert-buffer t t))
+              (rustic-format-check-warning-buffer))
           (with-current-buffer next-error-last-buffer
             (goto-char rustic-save-pos))
           (goto-char (point-min))

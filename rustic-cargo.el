@@ -379,19 +379,19 @@ If BIN is not nil, create a binary application, otherwise a library."
 (defun rustic-run-cargo-command (command &optional args)
   "Run the specified COMMAND with cargo."
   (rustic-compilation-process-live)
-  (rustic-compilation-start (split-string command) args))
+  (rustic-compilation-start (list rustic-cargo-bin ,@command) args))
 
 ;;;###autoload
 (defun rustic-cargo-build ()
   "Run 'cargo build' for the current project."
   (interactive)
-  (rustic-run-cargo-command "cargo build"))
+  (rustic-run-cargo-command (list "build")))
 
 ;;;###autoload
 (defun rustic-cargo-run ()
   "Run 'cargo run' for the current project."
   (interactive)
-  (rustic-run-cargo-command "cargo run" (list :mode 'rustic-cargo-run-mode)))
+  (rustic-run-cargo-command (list "run") (list :mode 'rustic-cargo-run-mode)))
 
 (define-derived-mode rustic-cargo-run-mode rustic-compilation-mode "Cargo run"
   "Mode for 'cargo run' that derives from `rustic-compilation-mode', but uses
@@ -404,27 +404,27 @@ the keymap of `comint-mode' so user input is possible."
 (defun rustic-cargo-clean ()
   "Run 'cargo clean' for the current project."
   (interactive)
-  (rustic-run-cargo-command "cargo clean"))
+  (rustic-run-cargo-command (list "clean")))
 
 ;;;###autoload
 (defun rustic-cargo-check ()
   "Run 'cargo check' for the current project."
   (interactive)
-  (rustic-run-cargo-command "cargo check"))
+  (rustic-run-cargo-command (list "check")))
 
 ;;;###autoload
 (defun rustic-cargo-bench ()
   "Run 'cargo bench' for the current project."
   (interactive)
-  (rustic-run-cargo-command "cargo bench"))
+  (rustic-run-cargo-command (list "bench")))
 
 ;;;###autoload
 (defun rustic-cargo-build-doc ()
   "Build the documentation for the current project."
   (interactive)
   (if (y-or-n-p "Create documentation for dependencies?")
-      (rustic-run-cargo-command "cargo doc")
-    (rustic-run-cargo-command "cargo doc --no-deps")))
+      (rustic-run-cargo-command (list "doc"))
+    (rustic-run-cargo-command (split-string "doc --no-deps"))))
 
 ;; TODO: buffer with cargo output should be in rustic-compilation-mode
 ;;;###autoload
@@ -434,8 +434,8 @@ The documentation is built if necessary."
   (interactive)
   (if (y-or-n-p "Open docs for dependencies as well?")
       ;; open docs only works with synchronous process
-      (shell-command "cargo doc --open")
-    (shell-command "cargo doc --open --no-deps")))
+      (shell-command (concat rustic-cargo-bin " doc --open"))
+    (shell-command (concat rustic-cargo-bin " doc --open --no-deps"))))
 
 ;;; cargo edit
 
@@ -451,8 +451,9 @@ If running with prefix command `C-u', read whole command from minibuffer."
   (when (rustic-cargo-edit-installed-p)
     (let* ((command (if arg
                         (read-from-minibuffer "Cargo add command: " "cargo add ")
-                      (concat "cargo add " (read-from-minibuffer "Crate: ")))))
-      (rustic-run-cargo-command command))))
+                      (concat rustic-cargo-bin " add "
+                              (read-from-minibuffer "Crate: ")))))
+      (rustic-run-cargo-command (split-string command)))))
 
 ;;;###autoload
 (defun rustic-cargo-rm (&optional arg)
@@ -462,8 +463,9 @@ If running with prefix command `C-u', read whole command from minibuffer."
   (when (rustic-cargo-edit-installed-p)
     (let* ((command (if arg
                         (read-from-minibuffer "Cargo rm command: " "cargo rm ")
-                      (concat "cargo rm " (read-from-minibuffer "Crate: ")))))
-      (rustic-run-cargo-command command))))
+                      (concat rustic-cargo-bin " rm "
+                              (read-from-minibuffer "Crate: ")))))
+      (rustic-run-cargo-command (split-string command)))))
 
 ;;;###autoload
 (defun rustic-cargo-upgrade (&optional arg)
@@ -473,8 +475,8 @@ If running with prefix command `C-u', read whole command from minibuffer."
   (when (rustic-cargo-edit-installed-p)
     (let* ((command (if arg
                         (read-from-minibuffer "Cargo upgrade command: " "cargo upgrade ")
-                      (concat "cargo upgrade"))))
-      (rustic-run-cargo-command command))))
+                      (concat rustic-cargo-bin " upgrade"))))
+      (rustic-run-cargo-command (split-string command)))))
 
 (provide 'rustic-cargo)
 ;;; rustic-cargo.el ends here
